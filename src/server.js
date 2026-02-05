@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import healthRoutes from './routes/healthRoutes.js';
 import { prisma } from './lib/prisma.js';
 
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
@@ -20,6 +21,7 @@ app.use(express.json());
 
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes)
+app.use('/api/health', healthRoutes)
 // Basic health check
 app.get('/', (req, res) => {
     res.send('Chatbot API is running...');
