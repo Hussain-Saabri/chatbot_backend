@@ -1,4 +1,6 @@
 import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddings/huggingface_transformers";
+import { HuggingFaceInferenceEmbeddings } from "@langchain/community/embeddings/hf";
+
 import { Pinecone as PineconeClient } from "@pinecone-database/pinecone";
 import { PineconeStore } from "@langchain/pinecone";
 import { ChatGroq } from "@langchain/groq";
@@ -32,31 +34,26 @@ async function initLLM() {
     }
     process.stdout.write("Initializing LLM Chain... ");
     console.time("llm_init");
-    const embedding = new HuggingFaceTransformersEmbeddings({
+    const embedding = new HuggingFaceInferenceEmbeddings({
+        apiKey: process.env.HUGGINGFACEHUB_API_TOKEN,
         model: "sentence-transformers/all-MiniLM-L6-v2",
-
-        modelOptions: {
-            dtype: "fp32",
-        }
     });
-    console.log("Embedding created.");
-    console.log("Pinecone client creating.");
+
+
     const pc = new PineconeClient({
         apiKey: process.env.PINECONE_API_KEY,
     });
-    console.log("Pinecone client created.");
-    console.log("Vector store creating.");
+
     const vectorStore = await PineconeStore.fromExistingIndex(
         embedding,
         { pineconeIndex: pc.Index(indexName) }
     );
-    console.log("Vector store created.");
-    console.log("Retriever creating.");
+
     const retriever = vectorStore.asRetriever({
         searchType: "similarity",
         k: 4,
     });
-    console.log("Retriever created.", retriever);
+
 
     const llm = new ChatGroq({
         model: "llama-3.1-8b-instant",
@@ -64,7 +61,7 @@ async function initLLM() {
         apiKey: process.env.GROQ_API_KEY,
         streaming: true,
     });
-    console.log("rephrase prompt creating.");
+
     const rephrasePrompt = PromptTemplate.fromTemplate(`
     Chat history:
     {chat_history}
@@ -159,8 +156,8 @@ Context:
         combineDocsChain,
     });
 
-    console.timeEnd("llm_init");
-    console.log("LLM Chain ready.");
+
+
     return retrievalChain;
 }
 
@@ -170,9 +167,7 @@ export async function* getAIResponse(input, chatHistory = []) {
 
 
         const chain = await initLLM();
-        console.log("logging the chain", chain);
-        console.log("Starting stream for input:", input);
-        console.time("first_chunk_latency");
+
         const stream = await chain.stream({
             input,
             chat_history: chatHistory,
@@ -184,15 +179,14 @@ export async function* getAIResponse(input, chatHistory = []) {
         for await (const chunk of stream) {
             if (chunk.answer) {
                 if (firstChunk) {
-                    console.timeEnd("first_chunk_latency");
-                    console.log("Stream started yielding chunks.");
+
                     firstChunk = false;
                 }
                 yield chunk.answer;
             }
         }
     } catch (error) {
-        console.error("LLM Error:", error);
+
         throw new Error("Failed to get response from AI");
     }
 }

@@ -12,13 +12,12 @@ const saveChatMessage = async (conversationId, sender, content) => {
 export const sendMessage = async (req, res) => {
     const { content, conversationId } = req.body;
     const userId = req.user.userId;
-    console.log(`>>> Incoming Request: user=${userId}, content="${content?.substring(0, 30)}..."`);
-
+    const startTime = Date.now();
+    console.log(`>>> [REQUEST RECEIVED] user=${userId}, content="${content?.substring(0, 20)}..."`);
     try {
         if (!content) {
             return res.status(400).json({ error: "Message content is required" });
         }
-
         let conversation;
         let chatHistory = [];
 
@@ -65,9 +64,15 @@ export const sendMessage = async (req, res) => {
         res.setHeader('X-Accel-Buffering', 'no'); // Crucial for Nginx/Proxies
 
         let fullAIResponse = "";
+        let isFirstChunk = true;
         const stream = getAIResponse(content, chatHistory);
 
         for await (const chunk of stream) {
+            if (isFirstChunk) {
+                const latency = Date.now() - startTime;
+                console.log(`>>> [FIRST CHUNK] Latency: ${latency}ms`);
+                isFirstChunk = false;
+            }
             res.write(chunk);
             fullAIResponse += chunk;
         }
@@ -75,10 +80,12 @@ export const sendMessage = async (req, res) => {
         // 4. Save AI Message
         await saveChatMessage(conversation.id, "ai", fullAIResponse);
 
+        const totalDuration = Date.now() - startTime;
+        console.log(`>>> [STREAM COMPLETE] Last chunk sent. Total Duration: ${totalDuration}ms`);
         res.end();
 
     } catch (error) {
-        console.error("Chat error:", error);
+
         if (!res.headersSent) {
             res.status(500).json({ error: "Internal server error" });
         } else {

@@ -3,10 +3,10 @@ import { sendMessage, getConversations, getMessages } from '../controllers/chatC
 import authMiddleware from '../middleware/authMiddleware.js';
 
 const router = express.Router();
-
+console.log("Inside he chatroutes")
 // All chat routes deserve protection
 router.use(authMiddleware);
-
+console.log("Inside chatroutes");   
 router.post('/', sendMessage);
 router.get('/conversations', getConversations);
 router.get('/conversations/:id', getMessages);
