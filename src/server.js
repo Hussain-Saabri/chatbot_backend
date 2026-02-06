@@ -16,10 +16,7 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-console.log("Starting server...");
-console.log("Port:", PORT);
-console.log("DATABASE_URL present:", !!process.env.DATABASE_URL);
-console.log("OPENAI_API present:", !!process.env.OPENAI_API);
+
 
 // Middleware
 app.use(cors());

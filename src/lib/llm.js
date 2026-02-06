@@ -21,24 +21,38 @@ const indexName = "medical-chatbot2";
 
 
 let retrievalChain;
-console.log("retrievalChain", retrievalChain);
+let basicRetrievalChain;
+
+const isGreeting = (text) => {
+    const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'how are you', 'how are u', 'hii'];
+    const cleaned = text.toLowerCase().trim().replace(/[^\w\s]/gi, '');
+    return greetings.some(g => cleaned === g || cleaned.startsWith(g + ' '));
+};
 
 async function initLLM() {
-    console.log("Inside initLLM function");
-    if (retrievalChain == null) {
-        console.log("Retrieval chain not initialized.");
-    }
     if (retrievalChain) {
-        console.log("Retrieval chain already initialized.");
-        return retrievalChain;
+        return { retrievalChain, basicRetrievalChain };
     }
     process.stdout.write("Initializing LLM Chain... ");
     console.time("llm_init");
     const embedding = new HuggingFaceInferenceEmbeddings({
         apiKey: process.env.HUGGINGFACEHUB_API_TOKEN,
         model: "sentence-transformers/all-MiniLM-L6-v2",
+        provider: "hf-inference",
     });
 
+    const originalEmbedQuery = embedding.embedQuery.bind(embedding);
+    embedding.embedQuery = async (text) => {
+        const start = Date.now();
+        if (typeof text !== 'string') {
+            console.log(">>> [DEBUG] Embedding text is NOT a string:", typeof text);
+            console.dir(text, { depth: null });
+        }
+        const queryText = typeof text === 'string' ? text : (text?.input || JSON.stringify(text));
+        const res = await originalEmbedQuery(queryText);
+        console.log(`>>> [TIMING] 2.1 Hugging Face Query Embedding: ${Date.now() - start}ms`);
+        return res;
+    };
 
     const pc = new PineconeClient({
         apiKey: process.env.PINECONE_API_KEY,
@@ -51,8 +65,18 @@ async function initLLM() {
 
     const retriever = vectorStore.asRetriever({
         searchType: "similarity",
-        k: 4,
+        k: 2,
     });
+
+    const originalGetDocs = retriever._getRelevantDocuments.bind(retriever);
+    retriever._getRelevantDocuments = async (query, runManager) => {
+        const start = Date.now();
+        // If query is an object, similaritySearch might fail later if not handled.
+        // We log it to help debug why basicRetrievalChain passes objects.
+        const res = await originalGetDocs(query, runManager);
+        console.log(`>>> [TIMING] 2.2 Pinecone Vector Search (Total): ${Date.now() - start}ms`);
+        return res;
+    };
 
 
     const llm = new ChatGroq({
@@ -71,8 +95,7 @@ async function initLLM() {
 
     Rewrite the question clearly as a full medical question:
     `);
-    console.log("rephrase prompt created.", rephrasePrompt);
-    console.log("system prompt creating.");
+
     const systemPrompt = `
 You are Dr. Nura AI, a polite, friendly, and reliable healthcare assistant.
 
@@ -132,7 +155,7 @@ Do not create examples of previous medical situations.
 Context:
 {context}
 `;
-    console.log("system prompt created.", systemPrompt);
+
 
     const prompt = ChatPromptTemplate.fromMessages([
         ["system", systemPrompt],
@@ -156,39 +179,69 @@ Context:
         combineDocsChain,
     });
 
+    basicRetrievalChain = await createRetrievalChain({
+        retriever: retriever,
+        combineDocsChain,
+    });
 
+    console.timeEnd("llm_init");
 
-    return retrievalChain;
+    return { retrievalChain, basicRetrievalChain };
 }
 
 export async function* getAIResponse(input, chatHistory = []) {
+    const totalStart = Date.now();
+
+    // ⚡ Fast Path: Greetings
+    if (isGreeting(input)) {
+        console.log(">>> [FAST PATH] Greeting detected. Jumping to instant response.");
+        yield "Hello! I am Dr. Nura AI, your professional healthcare assistant. How can I help you with your health today?";
+        return;
+    }
+
     try {
-        console.log("Inside getAIResponse function");
+        const { retrievalChain, basicRetrievalChain } = await initLLM();
 
+        const isNewChat = chatHistory.length === 0;
+        console.log(`>>> [LLM] Request started. History length: ${chatHistory.length}. New Chat: ${isNewChat}`);
+        const streamRequestStart = Date.now();
 
-        const chain = await initLLM();
+        // Callbacks to see which internal part is slow
+        const callbacks = [{
+            handleRetrieverStart() { console.time(">>> [TIMING] 2. Pinecone Retrieval"); },
+            handleRetrieverEnd() { console.timeEnd(">>> [TIMING] 2. Pinecone Retrieval"); },
+            handleLLMStart(llm, prompts) {
+                console.time(">>> [TIMING] 1. LLM Step (Rephrase/Answer)");
+            },
+            handleLLMEnd() { console.timeEnd(">>> [TIMING] 1. LLM Step (Rephrase/Answer)"); }
+        }];
+
+        // 🚀 Optimization: Skip rephrasing for new chats
+        const chain = isNewChat ? basicRetrievalChain : retrievalChain;
+        if (isNewChat) console.log(">>> [OPTIMIZATION] Skipping rephrase step for new conversation.");
+
+        // ⏱️ Split Timing: Embedding vs Search
+        // We can't easily split internal LangChain steps, but we can log when the LLM actually starts getting context.
 
         const stream = await chain.stream({
-            input,
+            input: input.toString(),
             chat_history: chatHistory,
-        });
-
-
+        }, { callbacks });
 
         let firstChunk = true;
         for await (const chunk of stream) {
-            if (chunk.answer) {
+            if (chunk.answer !== undefined) {
                 if (firstChunk) {
-
+                    const timeToFirst = Date.now() - streamRequestStart;
+                    console.log(`>>> [LLM] First chunk received from Groq. Internal delay: ${timeToFirst}ms`);
                     firstChunk = false;
                 }
                 yield chunk.answer;
             }
         }
+        console.log(`>>> [LLM] Response complete. Internal processing time: ${Date.now() - totalStart}ms`);
     } catch (error) {
-
+        console.error(">>> [LLM ERROR]:", error);
         throw new Error("Failed to get response from AI");
     }
 }
-
-

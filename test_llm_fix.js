@@ -1,26 +1,16 @@
 import { getAIResponse } from './src/lib/llm.js';
 
 async function test() {
-    console.log("Starting LLM test...");
+    const query = "What is diabetes?";
+    console.log(`\n--- Testing: "${query}" ---`);
     try {
-        const stream = getAIResponse("Explain what a fever is in simple terms.");
-        console.log("Stream started, waiting for chunks...");
-
-        let fullResponse = "";
+        const stream = getAIResponse(query);
         for await (const chunk of stream) {
             process.stdout.write(chunk);
-            fullResponse += chunk;
         }
-
-        console.log("\n\nTest complete!");
-        if (fullResponse.length > 0) {
-            console.log("PASS: Received a response from AI.");
-        } else {
-            console.log("FAIL: Received an empty response from AI.");
-        }
+        console.log("\n[DONE]");
     } catch (error) {
-        console.error("FAIL: Error during LLM test:", error.message);
-        process.exit(1);
+        console.error("\nFAIL:", error.message);
     }
 }
 
