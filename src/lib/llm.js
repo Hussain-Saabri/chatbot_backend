@@ -17,35 +17,46 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 const indexName = "medical-chatbot2";
 
-// Singleton setup
+
 let retrievalChain;
+console.log("retrievalChain", retrievalChain);
 
 async function initLLM() {
-    if (retrievalChain) return retrievalChain;
+    console.log("Inside initLLM function");
+    if (retrievalChain == null) {
+        console.log("Retrieval chain not initialized.");
+    }
+    if (retrievalChain) {
+        console.log("Retrieval chain already initialized.");
+        return retrievalChain;
+    }
     process.stdout.write("Initializing LLM Chain... ");
     console.time("llm_init");
-
     const embedding = new HuggingFaceTransformersEmbeddings({
         model: "sentence-transformers/all-MiniLM-L6-v2",
-        // Silence dtype warning by being explicit
+
         modelOptions: {
             dtype: "fp32",
         }
     });
-
+    console.log("Embedding created.");
+    console.log("Pinecone client creating.");
     const pc = new PineconeClient({
         apiKey: process.env.PINECONE_API_KEY,
     });
-
+    console.log("Pinecone client created.");
+    console.log("Vector store creating.");
     const vectorStore = await PineconeStore.fromExistingIndex(
         embedding,
         { pineconeIndex: pc.Index(indexName) }
     );
-
+    console.log("Vector store created.");
+    console.log("Retriever creating.");
     const retriever = vectorStore.asRetriever({
         searchType: "similarity",
-        k: 3,
+        k: 4,
     });
+    console.log("Retriever created.", retriever);
 
     const llm = new ChatGroq({
         model: "llama-3.1-8b-instant",
@@ -53,19 +64,20 @@ async function initLLM() {
         apiKey: process.env.GROQ_API_KEY,
         streaming: true,
     });
-
+    console.log("rephrase prompt creating.");
     const rephrasePrompt = PromptTemplate.fromTemplate(`
-Chat history:
-{chat_history}
+    Chat history:
+    {chat_history}
 
-User question:
-{input}
+    User question:
+    {input}
 
-Rewrite the question clearly as a full medical question:
-`);
-
+    Rewrite the question clearly as a full medical question:
+    `);
+    console.log("rephrase prompt created.", rephrasePrompt);
+    console.log("system prompt creating.");
     const systemPrompt = `
-You are Dr. Nova AI, a polite, friendly, and reliable healthcare assistant.
+You are Dr. Nura AI, a polite, friendly, and reliable healthcare assistant.
 
 Your role is to answer ONLY medical and health-related questions.
 
@@ -89,9 +101,14 @@ YOU SHOULD ANSWER ONLY QUESTIONS ABOUT:
 --------------------------------------------------
 
 IF A QUESTION IS NOT MEDICAL:
-- Give a polite, ONE-LINE refusal only.
-- STRICTLY DO NOT provide any information about the non-medical topic (e.g., if asked about a country, do NOT mention its location or facts).
-- Example: "I am here to help with health and medical questions only. Please ask me about symptoms, medical reports, or general healthcare."
+
+- Politely refuse to answer
+- Gently guide the user back to health-related topics
+- Do NOT give information about non-medical subjects
+
+Example refusal style:
+"I'm here to help with health and medical questions only.  
+Please ask me something about symptoms, health, or medical care."
 
 --------------------------------------------------
 
@@ -118,6 +135,7 @@ Do not create examples of previous medical situations.
 Context:
 {context}
 `;
+    console.log("system prompt created.", systemPrompt);
 
     const prompt = ChatPromptTemplate.fromMessages([
         ["system", systemPrompt],
@@ -148,13 +166,19 @@ Context:
 
 export async function* getAIResponse(input, chatHistory = []) {
     try {
+        console.log("Inside getAIResponse function");
+
+
         const chain = await initLLM();
+        console.log("logging the chain", chain);
         console.log("Starting stream for input:", input);
         console.time("first_chunk_latency");
         const stream = await chain.stream({
             input,
             chat_history: chatHistory,
         });
+
+
 
         let firstChunk = true;
         for await (const chunk of stream) {

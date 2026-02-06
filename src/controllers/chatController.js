@@ -3,10 +3,16 @@ import { getAIResponse } from '../lib/llm.js';
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 
 
+const saveChatMessage = async (conversationId, sender, content) => {
+    return prisma.message.create({
+        data: { conversationId, sender, content }
+    });
+};
+
 export const sendMessage = async (req, res) => {
     const { content, conversationId } = req.body;
     const userId = req.user.userId;
-    console.log(`>>> Incoming Chat Request: user=${userId}, conv=${conversationId}, content="${content?.substring(0, 50)}..."`);
+    console.log(`>>> Incoming Request: user=${userId}, content="${content?.substring(0, 30)}..."`);
 
     try {
         if (!content) {
@@ -28,13 +34,13 @@ export const sendMessage = async (req, res) => {
 
             const historyMessages = await prisma.message.findMany({
                 where: { conversationId },
-                orderBy: { createdAt: 'asc' }
+                orderBy: { createdAt: 'asc' },
+                take: -15 // Fetch only last 15 messages for context
             });
 
             chatHistory = historyMessages.map(msg =>
                 msg.sender === "user" ? new HumanMessage(msg.content) : new AIMessage(msg.content)
             );
-
         } else {
             conversation = await prisma.conversation.create({
                 data: {
@@ -45,19 +51,18 @@ export const sendMessage = async (req, res) => {
         }
 
         // 2. Save User Message
-        await prisma.message.create({
-            data: {
-                conversationId: conversation.id,
-                sender: "user",
-                content,
-            }
-        });
+        saveChatMessage(conversation.id, "user", content).catch(err => console.error("BG Save Error:", err));
 
         // 3. Set Headers and Stream Response
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.setHeader('Transfer-Encoding', 'chunked');
         res.setHeader('x-conversation-id', conversation.id);
         res.setHeader('Access-Control-Expose-Headers', 'x-conversation-id');
+
+        // Disable buffering for smooth streaming
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no'); // Crucial for Nginx/Proxies
 
         let fullAIResponse = "";
         const stream = getAIResponse(content, chatHistory);
@@ -67,14 +72,8 @@ export const sendMessage = async (req, res) => {
             fullAIResponse += chunk;
         }
 
-        // 4. Save AI Message to DB after streaming completes
-        await prisma.message.create({
-            data: {
-                conversationId: conversation.id,
-                sender: "ai",
-                content: fullAIResponse,
-            }
-        });
+        // 4. Save AI Message
+        await saveChatMessage(conversation.id, "ai", fullAIResponse);
 
         res.end();
 
@@ -105,7 +104,6 @@ export const getConversations = async (req, res) => {
 export const getMessages = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.userId;
-
     try {
         const conversation = await prisma.conversation.findUnique({
             where: { id }

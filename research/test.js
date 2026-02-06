@@ -64,7 +64,7 @@ const llm = new ChatGroq({
 // --- High-Level Retrieval Chain Implementation ---
 
 const systemPrompt = `
-You are Dr. Nova AI, a polite, friendly, and reliable healthcare assistant.
+You are Dr. Nura AI, a polite, friendly, and reliable healthcare assistant.
 
 Your role is to answer ONLY medical and health-related questions.
 
@@ -137,9 +137,6 @@ const historyAwareRetriever = await createHistoryAwareRetriever({
     retriever,
     rephrasePrompt,
 });
-
-
-
 
 // 1. Create the Combine Documents chain (Stuff Documents)
 const combineDocsChain = await createStuffDocumentsChain({
